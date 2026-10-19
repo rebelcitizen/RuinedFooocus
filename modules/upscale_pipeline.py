@@ -6,6 +6,8 @@ import modules.async_worker as worker
 import modules.controlnet
 from shared import path_manager
 import comfy.utils
+import comfy.model_management as model_management
+import comfy.model_patcher
 from comfy_extras.chainner_models import model_loading
 from comfy_extras.nodes_upscale_model import ImageUpscaleWithModel
 from PIL import Image
@@ -30,6 +32,12 @@ class pipeline:
         if "module.layers.0.residual_group.blocks.0.norm1.weight" in sd:
             sd = comfy.utils.state_dict_prefix_replace(sd, {"module.": ""})
         out = model_loading.load_state_dict(sd).eval()
+        # Newer ComfyUI's ImageUpscaleWithModel expects a .patcher on the model
+        out.patcher = comfy.model_patcher.CoreModelPatcher(
+            out.model,
+            load_device=model_management.get_torch_device(),
+            offload_device=model_management.unet_offload_device(),
+        )
         return out
 
     def load_base_model(self, name, hash=None):
@@ -75,23 +83,14 @@ class pipeline:
         )
 
         cn_settings = modules.controlnet.get_settings(gen_data)
-        upscaler_name = cn_settings["upscaler"]
-        upscale_path = path_manager.get_file_path(upscaler_name)
-        if upscale_path == None:
-            upscale_path = path_manager.get_file_path("4x-UltraSharp.pth")
-        upscaler_model = self.load_upscaler_model(upscale_path)
-
-        worker.add_result(
-            gen_data["task_id"],
-            "preview",
-            (-1, f"Upscaling image ...", None)
-        )
-        decoded_latent = ImageUpscaleWithModel().upscale(
-            upscaler_model, input_image
-        )[0]
-
+        # load_upscaler_model() resolves both downloadable models and files
+        # placed manually in the upscale_models folder
+        upscaler_name = cn_settings.get("upscaler")
+        if upscaler_name in [None, "", "None"]:
+            upscaler_name = "4x-UltraSharp.pth"
+        print(f"Upscaling with: {upscaler_name}")
         try:
-            upscaler_model = self.load_upscaler_model(upscale_path)
+            upscaler_model = self.load_upscaler_model(upscaler_name)
 
             worker.add_result(
                 gen_data["task_id"],
