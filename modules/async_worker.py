@@ -226,6 +226,9 @@ def _process(gen_data):
     # TODO: this should be an "inital ok gen_data" at the beginning of the function
     if "input_image" not in gen_data:
         gen_data["input_image"] = None
+    for key in ["input_image2", "input_image3"]:
+        if key not in gen_data:
+            gen_data[key] = None
     if "main_view" not in gen_data:
         gen_data["main_view"] = None
 
@@ -240,6 +243,7 @@ def _process(gen_data):
         n_txt = shift_attention(n_txt, distance)
 
         gen_data["seed"] = abs(seed) # Update seed
+        gen_data["image_index"] = i # Index within this prompt (used for Img2Img loopback)
         start_step = 0
         denoise = None
         with TimeIt("Pipeline process"):

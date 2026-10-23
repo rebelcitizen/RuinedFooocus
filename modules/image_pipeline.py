@@ -65,7 +65,7 @@ from comfy_extras.nodes_hunyuan import EmptyHunyuanImageLatent, EmptyHunyuanLate
 from comfy_extras.nodes_hidream_o1 import EmptyHiDreamO1LatentImage, HiDreamO1PatchSeamSmoothing
 from comfy_extras.nodes_chroma_radiance import EmptyChromaRadianceLatentImage
 from comfy_extras.nodes_edit_model import ReferenceLatent
-from comfy_extras.nodes_qwen import TextEncodeQwenImageEdit
+from comfy_extras.nodes_qwen import TextEncodeQwenImageEdit, TextEncodeQwenImageEditPlus
 from comfy_extras.nodes_mage import TextEncodeMageFlowEdit
 from node_helpers import conditioning_set_values
 
@@ -735,6 +735,7 @@ class pipeline:
 
         # Pre-process input-image
         input_images = 0
+        ref_images = [] # Extra reference images ("Reference image 2/3" in PowerUp) as tensors
         if input_image:
             input_image = np.array(input_image.convert("RGB")).astype(np.float32) / 255.0
             input_image = torch.from_numpy(input_image)[None,]
@@ -743,6 +744,14 @@ class pipeline:
                 image=input_image, upscale_method="bicubic", megapixels=megapixels, resolution_steps=1
             )[0]
             input_images = 1 # "Counter" for the single input-image we have. (for now)
+            # The edit nodes scale the references themselves, so keep them at native size here.
+            for key in ["input_image2", "input_image3"]:
+                ref = gen_data.get(key, None)
+                if ref is not None:
+                    ref = np.array(ref.convert("RGB")).astype(np.float32) / 255.0
+                    ref_images.append(torch.from_numpy(ref)[None,])
+        elif gen_data.get("input_image2", None) is not None or gen_data.get("input_image3", None) is not None:
+            print("WARNING: Reference images 2/3 are only used together with an Input image. Ignoring them.")
 
         # Text-encoding
         if 'has_image_edit' in self.model_info.get('flags', []) and input_images > 0:
@@ -757,28 +766,53 @@ class pipeline:
 
             match self.xl_base_patched.unet.model.__class__.__name__:
                 case 'QwenImage':
-                    self.conditions["+"]["cache"] = TextEncodeQwenImageEdit().execute(
-                        clip=self.xl_base_patched.clip,
-                        prompt=positive_prompt,
-                        vae=self.xl_base.vae,
-                        image=input_image
-                    )[0]
-                    self.conditions["-"]["cache"] = TextEncodeQwenImageEdit().execute(
-                        clip=self.xl_base_patched.clip,
-                        prompt=negative_prompt,
-                        vae=self.xl_base.vae,
-                        image=input_image
-                    )[0]
+                    if len(ref_images) > 0:
+                        # Several reference images: use the "Plus" encoder
+                        # (Qwen-Image-Edit-2509 and later, up to 3 images).
+                        qwen_images = [input_image] + ref_images[:2]
+                        qwen_images += [None] * (3 - len(qwen_images))
+                        self.conditions["+"]["cache"] = TextEncodeQwenImageEditPlus().execute(
+                            clip=self.xl_base_patched.clip,
+                            prompt=positive_prompt,
+                            vae=self.xl_base.vae,
+                            image1=qwen_images[0],
+                            image2=qwen_images[1],
+                            image3=qwen_images[2],
+                        )[0]
+                        self.conditions["-"]["cache"] = TextEncodeQwenImageEditPlus().execute(
+                            clip=self.xl_base_patched.clip,
+                            prompt=negative_prompt,
+                            vae=self.xl_base.vae,
+                            image1=qwen_images[0],
+                            image2=qwen_images[1],
+                            image3=qwen_images[2],
+                        )[0]
+                    else:
+                        self.conditions["+"]["cache"] = TextEncodeQwenImageEdit().execute(
+                            clip=self.xl_base_patched.clip,
+                            prompt=positive_prompt,
+                            vae=self.xl_base.vae,
+                            image=input_image
+                        )[0]
+                        self.conditions["-"]["cache"] = TextEncodeQwenImageEdit().execute(
+                            clip=self.xl_base_patched.clip,
+                            prompt=negative_prompt,
+                            vae=self.xl_base.vae,
+                            image=input_image
+                        )[0]
                 case 'MageFlow':
                     img = gen_data["input_image"]
                     img = np.array(img).astype(np.float32) / 255.0
                     img = torch.from_numpy(img)[None,]
+                    mage_images = {"image_1": img}
+                    for n, ref in enumerate(ref_images, start=2):
+                        mage_images[f"image_{n}"] = ref
                     self.conditions["+"]["cache"], self.conditions["-"]["cache"], latent = TextEncodeMageFlowEdit().execute(
                         clip=self.xl_base_patched.clip,
                         vae=self.xl_base_patched.vae,
                         prompt=positive_prompt,
                         negative_prompt=negative_prompt,
-                        images={"image_1": img}
+                        images=mage_images
                     ).result
                 case _:
                     print(f"ERROR: Trying to encode with unknown model {self.xl_base_patched.unet.__class__.__name__}. (This should never happen.")
@@ -836,6 +870,9 @@ class pipeline:
             controlnet["type"] = "kontext"
             img2img_mode = True
 
+        if len(ref_images) > 0 and not img2img_mode:
+            print("WARNING: Extra reference images are only used by edit models (Qwen-Image-Edit, Flux.1 Kontext, Flux.2, Mage Flow Edit). Ignoring them.")
+
         if controlnet["type"] != "None" and input_images > 0:
             if callback is not None:
                 worker.add_result(
@@ -881,8 +918,15 @@ class pipeline:
                 img2img_mode = True
 
         if img2img_mode:
-            # If this isn't the first image, do "Loopback"
-            if "preview_count" in shared.state and shared.state["preview_count"] > 0:
+            # If this isn't the first image of this prompt, do "Loopback".
+            # Only for the Img2Img cheat code: edit models (Kontext, Flux.2, Qwen, Mage)
+            # always start from the original input image, and a "---" prompt list
+            # never feeds one prompt's result into the next.
+            if (
+                controlnet["type"].lower() == "img2img"
+                and gen_data.get("image_index", 0) > 0
+                and "prev_image" in shared.shared_cache
+            ):
                 input_image = Image.fromarray(shared.shared_cache["prev_image"]).convert("RGB")
                 input_image = np.array(input_image).astype(np.float32) / 255.0
                 input_image = torch.from_numpy(input_image)[None,]
@@ -965,6 +1009,14 @@ class pipeline:
         if isinstance(self.xl_base.unet.model, Flux):
             if controlnet.get("type", "") == "kontext":
                 positive_cond = ReferenceLatent().execute(positive_cond, latent=latent)[0]
+                # Extra reference images: chain one ReferenceLatent per image
+                # (Flux.1 Kontext and Flux.2 multi-reference editing).
+                for ref in ref_images:
+                    ref = FluxKontextImageScale().scale(ref)[0]
+                    ref_latent = VAEEncode().encode(
+                        vae=self.xl_base_patched.vae, pixels=ref
+                    )[0]
+                    positive_cond = ReferenceLatent().execute(positive_cond, latent=ref_latent)[0]
             positive_cond = conditioning_set_values(positive_cond, {"guidance": cfg})
             cfg = 1.0
 

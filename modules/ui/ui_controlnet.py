@@ -201,6 +201,26 @@ def add_controlnet_tab(main_view, inpaint_view, prompt, image_number, run_event)
             visible=True,
         )
         add_ctrl("input_image", input_image)
+
+        # Extra reference images for edit models that accept more than one image
+        # (Qwen-Image-Edit 2509+, Flux.2, Flux.1 Kontext, Mage Flow Edit).
+        # The "Input image" above is image 1.
+        with gr.Accordion(label=t("Extra reference images"), open=False):
+            gr.Markdown(
+                t("Only used by edit models (Qwen-Image-Edit, Flux.2, Flux.1 Kontext, Mage Flow Edit). The Input image above is image 1; refer to them in the prompt as image 1, 2 and 3.")
+            )
+            with gr.Row():
+                input_image2 = gr.Image(
+                    label=t("Reference image 2"),
+                    type="pil",
+                )
+                input_image3 = gr.Image(
+                    label=t("Reference image 3"),
+                    type="pil",
+                )
+        add_ctrl("input_image2", input_image2)
+        add_ctrl("input_image3", input_image3)
+
         inpaint_toggle = gr.Checkbox(label=t("Inpainting"), value=False)
 
         add_ctrl("inpaint_toggle", inpaint_toggle)
