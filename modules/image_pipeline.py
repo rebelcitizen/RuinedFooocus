@@ -94,6 +94,17 @@ from molbal_comfyui_gguf.ops import GGMLOps
 #from calcuis_gguf.pig import load_gguf_sd, GGMLOps, GGUFModelPatcher
 #from calcuis_gguf.pig import DualClipLoaderGGUF as DualCLIPLoaderGGUF
 
+def scale_reference_by_weight(image, weight):
+    """Shrink a reference image's area to `weight` of its size (floor 0.2 MP, multiples of 16)."""
+    weight = max(0.1, min(1.0, float(weight)))
+    if weight >= 0.999:
+        return image
+    megapixels = image.shape[1] * image.shape[2] / (1024 * 1024)
+    return ImageScaleToTotalPixels().execute(
+        image=image, upscale_method="area", megapixels=max(0.2, megapixels * weight), resolution_steps=16
+    )[0]
+
+
 class pipeline:
     pipeline_type = ["sdxl", "ssd", "sd3", "flux", "flux2", "lumina2"]
 
@@ -1008,11 +1019,22 @@ class pipeline:
         positive_cond = switched_prompt if switched_prompt else self.conditions["+"]["cache"]
         if isinstance(self.xl_base.unet.model, Flux):
             if controlnet.get("type", "") == "kontext":
-                positive_cond = ReferenceLatent().execute(positive_cond, latent=latent)[0]
+                # Per-image weights (0.1-1): a lighter weight shrinks the reference, so it
+                # contributes fewer tokens and steers the result less. The start latent
+                # keeps its size, so the output resolution is unaffected.
+                weights = gen_data.get("input_weights") or {}
+                ref0_latent = latent
+                w0 = float(weights.get(0, 1.0))
+                if w0 < 0.999:
+                    ref0_latent = VAEEncode().encode(
+                        vae=self.xl_base_patched.vae, pixels=scale_reference_by_weight(input_image, w0)
+                    )[0]
+                positive_cond = ReferenceLatent().execute(positive_cond, latent=ref0_latent)[0]
                 # Extra reference images: chain one ReferenceLatent per image
                 # (Flux.1 Kontext and Flux.2 multi-reference editing).
-                for ref in ref_images:
+                for n, ref in enumerate(ref_images, start=1):
                     ref = FluxKontextImageScale().scale(ref)[0]
+                    ref = scale_reference_by_weight(ref, float(weights.get(n, 1.0)))
                     ref_latent = VAEEncode().encode(
                         vae=self.xl_base_patched.vae, pixels=ref
                     )[0]

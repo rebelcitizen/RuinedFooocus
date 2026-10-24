@@ -178,6 +178,13 @@ class ImageGenerationWorker(JobWorker):
         if cheat in (None, "", "None"):
             cheat = "None"
 
+        input_weights: Dict[int, float] = {}
+        for key, value in (spec.get("input_weights") or {}).items():
+            try:
+                input_weights[int(key)] = max(0.1, min(1.0, float(value)))
+            except (TypeError, ValueError):
+                continue
+
         defaults = settings.default_settings
         loras = [
             ("", f"{defaults.get(f'lora_{n}_weight', 1.0)} - {defaults.get(f'lora_{n}_model', 'None')}")
@@ -204,6 +211,7 @@ class ImageGenerationWorker(JobWorker):
             "input_image": images.get(0),
             "input_image2": images.get(1),
             "input_image3": images.get(2),
+            "input_weights": input_weights,
             "inpaint_toggle": False,
             "main_view": None,
             "remote_job_id": job.id,
