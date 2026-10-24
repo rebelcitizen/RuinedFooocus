@@ -1497,6 +1497,13 @@ if isinstance(args.auth, str) and not "/" in args.auth:
 launch_app(args)
 add_fastapi()
 
+# Register with a JobHub server when JOBHUB_URL / JOBHUB_TOKEN are configured (see .env.example)
+try:
+    import modules.remote_worker as remote_worker
+    remote_worker.start()
+except Exception as e:
+    print(f"Remote worker: not started ({e})")
+
 # Wait...
 while True:
     time.sleep(100) # Waiting to exit

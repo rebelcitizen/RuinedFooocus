@@ -392,7 +392,7 @@ def worker():
                     if gen_data["generate_forever"]:
                         reset_preview()
                     results.extend(_process(tmp_data))
-                    if shared.state["interrupted"]:
+                    if shared.state.get("interrupted", False):
                         break
                     tmp_data["index"] = (tmp_data["index"][0] + 1, tmp_data["index"][1])
             else:
@@ -451,7 +451,13 @@ def worker():
         time.sleep(0.01)
         if len(buffer) > 0:
             task = buffer.pop(0)
-            handler(task)
+            try:
+                handler(task)
+            except Exception:
+                # One broken task must not kill the worker thread (which would leave
+                # the UI and remote workers waiting forever). Report an empty result.
+                traceback.print_exc()
+                add_result(task.get("task_id"), "results", [])
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()

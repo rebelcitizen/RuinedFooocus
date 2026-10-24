@@ -56,3 +56,6 @@ models/upscale_models/*.jpeg
 .gradio/flagged/dataset1.csv
 cache/images.db
 settings/pip.json
+
+# JobHub worker configuration (server URL and token): never commit
+.env
