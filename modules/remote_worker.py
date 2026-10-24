@@ -113,6 +113,7 @@ class ImageGenerationWorker(JobWorker):
             raise JobCancelled(job.id)
 
         preview_grid = Path(str(path_manager.model_paths["temp_preview_path"])).resolve()
+        cut_out = bool(spec.get("remove_background"))
         uploaded = 0
         for item in results:
             path = Path(str(item))
@@ -122,10 +123,32 @@ class ImageGenerationWorker(JobWorker):
                 continue
             if resolved == preview_grid or path.suffix.lower() != ".png" or not path.is_file():
                 continue
-            ctx.add_output(path, kind="image", metadata=_png_metadata(path), mime="image/png")
+            metadata = _png_metadata(path)
+            if cut_out:
+                ctx.progress(100, "removing background")
+                path = self._remove_background(path, ctx.work_dir)
+                metadata["transparent"] = True
+            ctx.add_output(path, kind="image", metadata=metadata, mime="image/png")
             uploaded += 1
         if uploaded == 0:
             raise RuntimeError("generation finished without producing an image")
+
+    _rembg_session = None
+
+    def _remove_background(self, path: Path, work_dir: Path) -> Path:
+        """Cut the background with RuinedFooocus's RemBG (rembg/u2net) and return an RGBA PNG."""
+        import rembg
+
+        if self._rembg_session is None:
+            self._rembg_session = rembg.new_session()
+        with Image.open(path) as im:
+            rgba = rembg.remove(im.convert("RGB"), session=self._rembg_session)
+        # u2net leaves the object at ~98% alpha; snap near-opaque and near-clear pixels so engines get a clean sprite.
+        alpha = rgba.getchannel("A").point(lambda v: 255 if v >= 230 else (0 if v <= 15 else v))
+        rgba.putalpha(alpha)
+        out = work_dir / f"{path.stem}_rgba.png"
+        rgba.save(out, "PNG")
+        return out
 
     def on_cancel(self, job_id: str) -> None:
         if job_id == self._current_job_id:
