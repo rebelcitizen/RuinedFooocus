@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import json
 import logging
+import logging.handlers
 import os
+import queue
 import socket
 import sys
 import time
@@ -313,13 +315,27 @@ def start() -> Optional[ImageGenerationWorker]:
         return None
 
 
+_log_listener: Optional[logging.handlers.QueueListener] = None
+
+
 def _configure_logging() -> None:
+    """Log through a queue: the worker threads never write to the console themselves.
+
+    A Windows console blocks every write while text is being selected in it, which
+    once froze the reconnect loop for good; the listener thread absorbs that instead.
+    """
+    global _log_listener
+    if _log_listener is not None:
+        return
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(name)s: %(message)s", "%H:%M:%S"))
+    log_queue: "queue.SimpleQueue[logging.LogRecord]" = queue.SimpleQueue()
+    _log_listener = logging.handlers.QueueListener(log_queue, handler, respect_handler_level=True)
+    _log_listener.start()
     for name in ("jobworker", "remote_worker"):
         logger = logging.getLogger(name)
         if logger.handlers:
             continue
-        handler = logging.StreamHandler(sys.stdout)
-        handler.setFormatter(logging.Formatter("%(asctime)s %(name)s: %(message)s", "%H:%M:%S"))
-        logger.addHandler(handler)
+        logger.addHandler(logging.handlers.QueueHandler(log_queue))
         logger.setLevel(logging.INFO)
         logger.propagate = False
