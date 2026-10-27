@@ -55,6 +55,11 @@ class ImageGenerationWorker(JobWorker):
         return {
             "models": list(shared.models.get_names("checkpoints")),
             "loras": list(shared.models.get_names("loras")),
+            # which base model each file belongs to: {"arch": "sdxl", "base": "Illustrious"} per name
+            "families": {
+                "checkpoints": shared.models.get_families("checkpoints"),
+                "loras": shared.models.get_families("loras"),
+            },
             "performances": [p for p in perf.keys()],
             "resolutions": list(shared.resolution_settings.aspect_ratios.keys()),
             "cheat_codes": list(modules.controlnet.cn_options.keys()),

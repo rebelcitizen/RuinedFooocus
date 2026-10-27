@@ -817,8 +817,43 @@ with shared.gradio_root as block:
                         outputs=[model_current, base_model]
                     )
 
+                def lora_caption(name):
+                    # The picker shows the base model next to each LoRA; lora_name_from_caption strips it again
+                    return f"{name}  [{shared.models.get_family('loras', name)['base']}]"
+
+                def lora_name_from_caption(caption):
+                    return re.sub(r"\s+\[[^\]]*\]$", "", caption)
+
+                def lora_choices(lorafilter, active_names, base_model_name, match):
+                    needle = (lorafilter or "").lower()
+                    names = [
+                        n for n in shared.models.get_names("loras")
+                        if needle in n.lower() and n not in active_names
+                    ]
+                    if match and base_model_name:
+                        # keep the LoRAs that fit the selected checkpoint, plus the ones nobody can tell
+                        names = [n for n in names if shared.models.lora_fits(n, base_model_name) is not False]
+                    return [(get_lora_thumbnail(n), lora_caption(n)) for n in names]
+
+                def lora_model_text(base_model_name):
+                    family = shared.models.get_family("checkpoints", base_model_name) if base_model_name else None
+                    if family is None or family["arch"] == "unknown":
+                        return t(
+                            "Selected model: {name}. Its type is unknown, so every LoRA is listed.",
+                            mapping={'name': Path(base_model_name or "").name},
+                        )
+                    return t(
+                        "LoRAs for {base}: {name}",
+                        mapping={'base': f"<b>{family['base']}</b>", 'name': Path(base_model_name).name},
+                    )
+
                 with gr.Tab(label="LoRAs"):
                     with gr.Group(visible=False) as lora_add:
+                        lora_model_info = gr.HTML(value=lora_model_text(settings["base_model"]))
+                        lora_match_model = gr.Checkbox(
+                            label=t("Only LoRAs that fit the selected model"),
+                            value=True,
+                        )
                         lorafilter = gr.Textbox(
                             placeholder=t("Search LoRA"),
                             value="",
@@ -838,12 +873,7 @@ with shared.gradio_root as block:
                             object_fit="contain",
                             buttons=None,
                             min_width=60,
-                            value=list(
-                                map(
-                                    lambda x: (get_lora_thumbnail(x), x),
-                                    shared.models.get_names("loras"),
-                                )
-                            ),
+                            value=lora_choices("", [], settings["base_model"], True),
                         )
                         lora_cancel_btn = gr.Button(
                             value="cancel",
@@ -911,35 +941,27 @@ with shared.gradio_root as block:
                 # LoRA
                 @lorafilter.input(
                     api_visibility='undocumented',
-                    inputs=[lorafilter, lora_active_gallery],
+                    inputs=[lorafilter, lora_active_gallery, base_model, lora_match_model],
                     outputs=[lora_gallery]
                 )
                 @lorafilter.submit(
                     api_visibility='undocumented',
-                    inputs=[lorafilter, lora_active_gallery],
+                    inputs=[lorafilter, lora_active_gallery, base_model, lora_match_model],
                     outputs=[lora_gallery]
                 )
-                def update_lora_filter(lorafilter, lora_active_gallery):
+                @lora_match_model.change(
+                    api_visibility='undocumented',
+                    inputs=[lorafilter, lora_active_gallery, base_model, lora_match_model],
+                    outputs=[lora_gallery]
+                )
+                def update_lora_filter(lorafilter, lora_active_gallery, base_model_name="", match=True):
                     if lora_active_gallery:
                         active = list(
                             map(lambda x: x[1].split(" - ", 1)[1], lora_active_gallery)
                         )
                     else:
                         active = []
-                    filtered_filenames = [
-                        x
-                        for x in map(
-                            lambda x: (get_lora_thumbnail(x), x),
-                            filter(
-                                lambda filename: lorafilter.lower() in filename.lower(),
-                                shared.models.get_names("loras"),
-                            ),
-                        )
-                        if x[1] not in active
-                    ]
-                    # Sorry for this. It is supposed to show all LoRAs matching the filter and is not currently used.
-
-                    return gr.update(value=filtered_filenames)
+                    return gr.update(value=lora_choices(lorafilter, active, base_model_name, match))
 
                 lora_active_selected = None
 
@@ -957,15 +979,16 @@ with shared.gradio_root as block:
                             active.append(l)
                     else:
                         gallery = []
-                    keywords = f"{keywords}, {load_keywords(evt.value['caption'])} "
+                    name = lora_name_from_caption(evt.value["caption"])
+                    keywords = f"{keywords}, {load_keywords(name)} "
                     gallery.append(
                         (
-                            get_lora_thumbnail(evt.value["caption"]),
-                            f"{w} - {evt.value['caption']}",
+                            get_lora_thumbnail(name),
+                            f"{w} - {name}",
                         )
                     )
                     lora_active_selected = len(gallery) - 1
-                    active.append(f"{evt.value['caption']}")
+                    active.append(name)
 
                     return {
                         lora_add: gr.update(visible=False),
@@ -989,7 +1012,7 @@ with shared.gradio_root as block:
                         ),
                     }
 
-                def lora_delete(gallery, lorafilter):
+                def lora_delete(gallery, lorafilter, base_model_name="", match=True):
                     global lora_active_selected
                     if gallery == None or len(gallery) == 0:
                         return {
@@ -1016,20 +1039,9 @@ with shared.gradio_root as block:
                         active_names.append(l)
                         keywords = f"{keywords}, {load_keywords(l)} "
 
-                    loras = list(
-                        filter(
-                            lambda filename: lorafilter.lower() in filename.lower(),
-                            shared.models.get_names("loras"),
-                        )
-                    )
-                    if len(loras) == 0:
-                        loras = shared.models.get_names("loras")
-
-                    inactive = [
-                        x
-                        for x in map(lambda x: (get_lora_thumbnail(x), x), loras)
-                        if x[1] not in active_names
-                    ]
+                    inactive = lora_choices(lorafilter, active_names, base_model_name, match)
+                    if len(inactive) == 0:
+                        inactive = lora_choices("", active_names, base_model_name, match)
                     return {
                         lora_gallery: gr.update(
                             value=inactive,
@@ -1076,7 +1088,7 @@ with shared.gradio_root as block:
                 lora_del_btn.click(
                     fn=lora_delete,
                     api_visibility='undocumented',
-                    inputs=[lora_active_gallery, lorafilter],
+                    inputs=[lora_active_gallery, lorafilter, base_model, lora_match_model],
                     outputs=[lora_gallery, lora_active_gallery, lora_keywords],
                 )
                 lora_gallery.select(
@@ -1098,6 +1110,22 @@ with shared.gradio_root as block:
                     outputs=[lora_active, lora_active_gallery, lora_weight_slider],
                 )
 
+                def lora_model_changed(lorafilter, lora_active_gallery, match, evt: gr.SelectData):
+                    # A new checkpoint was picked: show the LoRAs that fit it
+                    model_name = f"{evt.value['caption']}"
+                    active = [x[1].split(" - ", 1)[1] for x in (lora_active_gallery or [])]
+                    return {
+                        lora_gallery: gr.update(value=lora_choices(lorafilter, active, model_name, match)),
+                        lora_model_info: gr.update(value=lora_model_text(model_name)),
+                    }
+
+                model_gallery.select(
+                    fn=lora_model_changed,
+                    api_visibility='undocumented',
+                    inputs=[lorafilter, lora_active_gallery, lora_match_model],
+                    outputs=[lora_gallery, lora_model_info],
+                )
+
                 with gr.Row():
                     model_refresh = gr.Button(
                         value=f"\U0001f504 {t('Refresh All Files')}",
@@ -1107,7 +1135,7 @@ with shared.gradio_root as block:
 
             @model_refresh.click(
                 api_visibility='undocumented',
-                inputs=[lora_active_gallery],
+                inputs=[lora_active_gallery, base_model, lora_match_model],
                 outputs=[
                     modelfilter,
                     model_gallery,
@@ -1117,7 +1145,7 @@ with shared.gradio_root as block:
                     preset_gallery,
                 ],
             )
-            def model_refresh_clicked(lora_active_gallery):
+            def model_refresh_clicked(lora_active_gallery, base_model_name, match):
                 global civit_checkpoints, civit_loras, lora_active_selected
                 lora_active_selected=None
                 shared.models.update_all_models()
@@ -1126,7 +1154,7 @@ with shared.gradio_root as block:
                     modelfilter: gr.update(value=""),
                     model_gallery: update_model_filter(""),
                     lorafilter: gr.update(value=""),
-                    lora_gallery: update_lora_filter("", lora_active_gallery),
+                    lora_gallery: update_lora_filter("", lora_active_gallery, base_model_name, match),
                     style_selection: gr.update(choices=list(load_styles().keys())),
                     preset_gallery: gr.update(value=path_manager.get_presets()),
                 }
