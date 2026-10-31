@@ -28,5 +28,8 @@
     "Unblur + Upscale 2x (HAT-L)": {"type": "unblur", "deblur": "NAFNet-GoPro-width64.pth", "upscaler": "HAT-L-2x.pth"},
     "Unblur + Faces + Upscale 2x (HAT-L)": {"type": "unblur", "deblur": "NAFNet-GoPro-width64.pth", "faces": "GFPGANv1.4.pth", "upscaler": "HAT-L-2x.pth"},
     "Unblur + Sharpen, same size (HAT-L)": {"type": "unblur", "deblur": "NAFNet-GoPro-width64.pth", "sharpen": 120, "upscaler": "HAT-L-2x.pth", "keep_size": true},
-    "Faces only (GFPGAN)": {"type": "unblur", "deblur": "None", "faces": "GFPGANv1.4.pth"}
+    "Faces only (GFPGAN)": {"type": "unblur", "deblur": "None", "faces": "GFPGANv1.4.pth"},
+    "Unblur + Faces + Generative fix (light)": {"type": "unblur", "deblur": "NAFNet-GoPro-width64.pth", "faces": "GFPGANv1.4.pth", "refine": "generative", "refine_denoise": 0.4},
+    "Unblur + Faces + Generative fix (strong)": {"type": "unblur", "deblur": "NAFNet-GoPro-width64.pth", "faces": "GFPGANv1.4.pth", "refine": "generative", "refine_denoise": 0.7},
+    "Unblur + Faces + Generative fix (light) + Upscale 2x (HAT-L)": {"type": "unblur", "deblur": "NAFNet-GoPro-width64.pth", "faces": "GFPGANv1.4.pth", "refine": "generative", "refine_denoise": 0.4, "upscaler": "HAT-L-2x.pth"}
 }

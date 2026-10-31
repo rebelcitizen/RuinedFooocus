@@ -1,5 +1,6 @@
-"""Unblur a photo: a deblur model, optional face restoration, sharpening and an
-upscaler, chained in one PowerUp.
+"""Unblur a photo: a deblur model, optional face restoration, an optional
+generative fix-up with the job's checkpoint, sharpening and an upscaler,
+chained in one PowerUp.
 
 Every model loads through spandrel exactly like RuinedFooocus's upscalers do.
 The deblur models are 1x restoration networks kept in the upscale_models folder
@@ -9,8 +10,10 @@ Faces are found by OpenCV's YuNet detector and restored by GFPGAN v1.4 (Apache
 GFPGAN's own inference script does it. Both face files live in the faceswap
 folder. Known files download on first use (see modules/pathdb/restoration.json).
 
-Order of the steps: deblur -> find and restore faces -> unsharp mask ->
-upscaler -> (resize back to the input size) -> paste the restored faces.
+Order of the steps: deblur -> find and restore faces -> generative fix-up
+(the pipeline passes a callable that runs the job's model as Img2Img on the
+current image) -> faces again if asked -> unsharp mask -> upscaler -> (resize
+back to the input size) -> paste the restored faces.
 """
 from pathlib import Path
 
@@ -48,6 +51,9 @@ DEFAULTS = {
     "deblur": "NAFNet-GoPro-width64.pth",
     "faces": "None",
     "face_strength": 1.0,
+    "refine": "none",
+    "refine_denoise": 0.4,
+    "refine_faces": False,
     "sharpen": 0,
     "upscaler": "None",
     "keep_size": False,
@@ -139,10 +145,43 @@ def restore_face(desc, crop, strength):
     return y.astype(np.float32)
 
 
+def restore_faces(work, opts, status):
+    """Find every face in a PIL image and restore it.
+
+    Returns a list of (restored 512 px face, affine) where affine maps the
+    coordinates of `work` to the crop; the faces are pasted later with paste_faces.
+    """
+    face_model = opts.get("faces")
+    if face_model in NONE:
+        return []
+    status("Looking for faces ...")
+    rgb = np.array(work.convert("RGB"))
+    detector = model_file(opts.get("face_detector") or DEFAULT_FACE_DETECTOR, "path_faceswap")
+    landmarks = find_faces(rgb, detector)
+    if not landmarks:
+        status("No face found, skipping face restoration ...")
+        return []
+    desc = load_model(face_model, "path_faceswap")
+    strength = max(0.0, min(1.0, float(opts.get("face_strength", 1.0))))
+    faces = []
+    for i, lm in enumerate(landmarks):
+        affine, _ = cv2.estimateAffinePartial2D(lm, FACE_TEMPLATE, method=cv2.LMEDS)
+        if affine is None:
+            continue
+        status(f"Restoring face {i + 1} of {len(landmarks)} ...")
+        crop = cv2.warpAffine(
+            rgb, affine, (FACE_SIZE, FACE_SIZE),
+            borderMode=cv2.BORDER_CONSTANT, borderValue=FACE_BORDER,
+        )
+        faces.append((restore_face(desc, crop, strength), affine))
+    return faces
+
+
 def paste_face(canvas, face, affine, factor):
     """Blend a restored 512 px face back into canvas (float32 RGB at the final size).
 
-    affine maps input-image coordinates to the crop; factor is final size / input size.
+    affine maps the detection image's coordinates to the crop; factor is the
+    final size divided by the detection image's size.
     """
     h, w = canvas.shape[:2]
     inverse = cv2.invertAffineTransform(affine) * factor
@@ -156,8 +195,23 @@ def paste_face(canvas, face, affine, factor):
     return soft * warped + (1.0 - soft) * canvas
 
 
-def run(image, settings, status=lambda message: None):
-    """Restore one PIL image with a PowerUp's settings and return the result."""
+def paste_faces(work, faces, factor, status):
+    if not faces:
+        return work
+    status("Blending the restored faces ...")
+    canvas = np.array(work.convert("RGB")).astype(np.float32)
+    for face, affine in faces:
+        canvas = paste_face(canvas, face, affine, factor)
+    return Image.fromarray(np.clip(canvas, 0, 255).astype(np.uint8))
+
+
+def run(image, settings, status=lambda message: None, generative=None):
+    """Restore one PIL image with a PowerUp's settings and return the result.
+
+    `generative(image, denoise)` is supplied by the pipeline and runs the job's
+    checkpoint as Img2Img over the current image; it is only called when the
+    PowerUp sets refine to "generative".
+    """
     opts = dict(DEFAULTS)
     opts.update({k: v for k, v in settings.items() if v is not None})
     image = image.convert("RGB")
@@ -169,28 +223,19 @@ def run(image, settings, status=lambda message: None):
         status(f"Deblurring with {deblur} ...")
         work = to_image(apply_model(load_model(deblur, "path_upscalers"), to_tensor(work)))
 
-    faces = []
-    face_model = opts.get("faces")
-    if face_model not in NONE:
-        status("Looking for faces ...")
-        rgb = np.array(work)
-        detector = model_file(opts.get("face_detector") or DEFAULT_FACE_DETECTOR, "path_faceswap")
-        landmarks = find_faces(rgb, detector)
-        if landmarks:
-            desc = load_model(face_model, "path_faceswap")
-            strength = max(0.0, min(1.0, float(opts.get("face_strength", 1.0))))
-            for i, lm in enumerate(landmarks):
-                affine, _ = cv2.estimateAffinePartial2D(lm, FACE_TEMPLATE, method=cv2.LMEDS)
-                if affine is None:
-                    continue
-                status(f"Restoring face {i + 1} of {len(landmarks)} ...")
-                crop = cv2.warpAffine(
-                    rgb, affine, (FACE_SIZE, FACE_SIZE),
-                    borderMode=cv2.BORDER_CONSTANT, borderValue=FACE_BORDER,
-                )
-                faces.append((restore_face(desc, crop, strength), affine))
-        else:
-            status("No face found, skipping face restoration ...")
+    faces = restore_faces(work, opts, status)
+    detected_w = work.width
+
+    if str(opts.get("refine", "none")).lower() == "generative" and generative is not None:
+        # The restored faces go in first so the checkpoint sees them as its reference.
+        work = paste_faces(work, faces, 1.0, status)
+        faces = []
+        denoise = max(0.05, min(1.0, float(opts.get("refine_denoise", 0.4))))
+        status(f"Generative fix-up with the job's model (denoise {denoise}) ...")
+        work = generative(work, denoise).convert("RGB")
+        if opts.get("refine_faces"):
+            faces = restore_faces(work, opts, status)
+        detected_w = work.width
 
     sharpen = float(opts.get("sharpen") or 0)
     if sharpen > 0:
@@ -204,12 +249,4 @@ def run(image, settings, status=lambda message: None):
         if opts.get("keep_size"):
             work = work.resize((orig_w, orig_h), Image.Resampling.LANCZOS)
 
-    if faces:
-        status("Blending the restored faces ...")
-        canvas = np.array(work).astype(np.float32)
-        factor = work.width / orig_w
-        for face, affine in faces:
-            canvas = paste_face(canvas, face, affine, factor)
-        work = Image.fromarray(np.clip(canvas, 0, 255).astype(np.uint8))
-
-    return work
+    return paste_faces(work, faces, work.width / detected_w, status)

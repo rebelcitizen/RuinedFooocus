@@ -743,6 +743,7 @@ class pipeline:
         switched_prompt = []
         img2img_mode = False
         updated_conditions = False
+        edit_denoise = None
 
         # Pre-process input-image
         input_images = 0
@@ -772,6 +773,11 @@ class pipeline:
                     "preview",
                     (-1, f"Processing image with text encoding ...", None)
                 )
+            # An Img2Img cheat code keeps its denoise with an edit model: the edit then
+            # starts from the input image's latent with that much noise instead of
+            # redrawing everything, so the picture's structure survives.
+            if controlnet and str(controlnet.get("type", "")).lower() == "img2img":
+                edit_denoise = float(controlnet.get("denoise", controlnet.get("strength", 1)))
             controlnet = None # Disable any other controlnet
             self.conditions = clean_prompt_cond_caches()
 
@@ -949,6 +955,8 @@ class pipeline:
             )[0]
             force_full_denoise = False
             denoise = float(controlnet.get("denoise", controlnet.get("strength", 1)))
+            if edit_denoise is not None:
+                denoise = edit_denoise
         else:
             # Get the correct of latent image to start with
             latent_type = self.model_info.get('latent', None)
