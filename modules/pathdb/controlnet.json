@@ -19,6 +19,11 @@
         "path": "path_controlnet",
         "filename": "control-lora-sketch-rank128-metadata.safetensors"
     },
+    "cn_tile": {
+        "url": "https://huggingface.co/xinsir/controlnet-tile-sdxl-1.0/resolve/main/diffusion_pytorch_model.safetensors",
+        "path": "path_controlnet",
+        "filename": "controlnet-tile-sdxl-1.0.safetensors"
+    },
     "4x-UltraSharp.pth": {
         "url": "https://huggingface.co/lokCX/4x-Ultrasharp/resolve/main/4x-UltraSharp.pth",
         "path": "path_upscalers",

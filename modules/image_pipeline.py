@@ -776,7 +776,7 @@ class pipeline:
             # An Img2Img cheat code keeps its denoise with an edit model: the edit then
             # starts from the input image's latent with that much noise instead of
             # redrawing everything, so the picture's structure survives.
-            if controlnet and str(controlnet.get("type", "")).lower() == "img2img":
+            if controlnet and str(controlnet.get("type", "")).lower() in ("img2img", "tile"):
                 edit_denoise = float(controlnet.get("denoise", controlnet.get("strength", 1)))
             controlnet = None # Disable any other controlnet
             self.conditions = clean_prompt_cond_caches()
@@ -913,6 +913,9 @@ class pipeline:
                     updated_conditions = True
                 case "depth":
                     updated_conditions = True
+                case "tile":
+                    # The tile ControlNet guides an Img2Img pass over the same image.
+                    img2img_mode = True
             if self.xl_controlnet:
                 (
                     self.conditions["+"]["cache"],

@@ -48,13 +48,15 @@ class pipeline:
         def status(message):
             worker.add_result(task_id, "preview", (-1, message, None))
 
-        def generative(image, denoise):
+        def generative(image, denoise, controlnet=None, strength=1.0):
             """Run the job's checkpoint as Img2Img over `image` with the job's prompt.
 
             Edit models (Flux.2 Klein, Kontext, Qwen-Image-Edit) take the image as
             their reference and keep the denoise as the amount they redraw; SDXL
-            models do a plain Img2Img pass. The intermediate image is saved to the
-            outputs folder like any other generation.
+            models do a plain Img2Img pass, or a ControlNet pass (`controlnet`
+            such as "tile" at `strength`) that starts from the image's latent
+            with `denoise`. The intermediate image is saved to the outputs
+            folder like any other generation.
             """
             data = dict(gen_data)
             prompt = data.get("prompt")
@@ -66,8 +68,9 @@ class pipeline:
                 "input_image2": None,
                 "input_image3": None,
                 "cn_selection": modules.controlnet.NEWCN,
-                "cn_type": "img2img",
-                "cn_strength": float(denoise),
+                "cn_type": str(controlnet or "img2img").lower(),
+                "cn_strength": float(strength if controlnet else denoise),
+                "cn_denoise": float(denoise),
                 "cn_start": 0.0,
                 "cn_stop": 1.0,
                 "cn_edge_low": 0.2,
@@ -93,10 +96,14 @@ class pipeline:
             status("Unblur needs an input image ...")
             return []
 
-        settings = modules.controlnet.get_settings(gen_data)
+        settings = dict(modules.controlnet.get_settings(gen_data))
+        # A tiled refine generates each tile at the job's resolution.
+        settings.setdefault("refine_tile", max(int(gen_data.get("width", 1024)), int(gen_data.get("height", 1024))))
         print(f"Unblur with: {settings}")
         try:
-            result = unblur.run(input_image, settings, status, generative)
+            seed = gen_data.get("seed", 0)
+            seed = int(seed) if isinstance(seed, (int, float, str)) and str(seed).lstrip("-").isdigit() else 0
+            result = unblur.run(input_image, settings, status, generative, seed=seed)
             status("Done ...")
             return [np.array(result.convert("RGB"))]
         except Exception:

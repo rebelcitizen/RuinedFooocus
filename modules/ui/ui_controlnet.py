@@ -144,6 +144,7 @@ def add_controlnet_tab(main_view, inpaint_view, prompt, image_number, run_event)
                 "default": [True, True, True, False, False, False],
                 "upscale": [False, False, False, False, False, True],
                 "unblur": [False, False, False, False, False, True],
+                "tile": [True, True, True, False, False, False],
                 "faceswap": [False, False, False, False, False, False],
             }
             if selection.lower() in slider_states:

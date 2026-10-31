@@ -1,20 +1,6 @@
 {
-    "Canny (low)": {
-        "type": "canny",
-        "edge_low": 0.2,
-       "edge_high": 0.8,
-        "strength": 0.5,
-        "start": 0.0,
-        "stop": 0.5
-    },
-    "Canny (high)": {
-        "type": "canny",
-        "edge_low": 0.2,
-        "edge_high": 0.8,
-        "strength": 1.0,
-        "start": 0.0,
-        "stop": 0.99
-    },
+    "Canny (low)": {"type": "canny", "edge_low": 0.2, "edge_high": 0.8, "strength": 0.5, "start": 0.0, "stop": 0.5},
+    "Canny (high)": {"type": "canny", "edge_low": 0.2, "edge_high": 0.8, "strength": 1.0, "start": 0.0, "stop": 0.99},
     "Depth (low)": {"type": "depth", "strength": 0.5, "start": 0.0, "stop": 0.5},
     "Depth (high)": {"type": "depth", "strength": 1.0, "start": 0.0, "stop": 0.99},
     "Recolour": {"type": "recolour", "strength": 1.0, "start": 0.0, "stop": 1.0},
@@ -31,5 +17,12 @@
     "Faces only (GFPGAN)": {"type": "unblur", "deblur": "None", "faces": "GFPGANv1.4.pth"},
     "Unblur + Faces + Generative fix (light)": {"type": "unblur", "deblur": "NAFNet-GoPro-width64.pth", "faces": "GFPGANv1.4.pth", "refine": "generative", "refine_denoise": 0.4},
     "Unblur + Faces + Generative fix (strong)": {"type": "unblur", "deblur": "NAFNet-GoPro-width64.pth", "faces": "GFPGANv1.4.pth", "refine": "generative", "refine_denoise": 0.7},
-    "Unblur + Faces + Generative fix (light) + Upscale 2x (HAT-L)": {"type": "unblur", "deblur": "NAFNet-GoPro-width64.pth", "faces": "GFPGANv1.4.pth", "refine": "generative", "refine_denoise": 0.4, "upscaler": "HAT-L-2x.pth"}
+    "Unblur + Faces + Generative fix (light) + Upscale 2x (HAT-L)": {"type": "unblur", "deblur": "NAFNet-GoPro-width64.pth", "faces": "GFPGANv1.4.pth", "refine": "generative", "refine_denoise": 0.4, "upscaler": "HAT-L-2x.pth"},
+    "SeedVR2 restore, same size": {"type": "unblur", "deblur": "None", "upscaler": "seedvr2_3b_fp8_e4m3fn.safetensors", "upscale_factor": 1},
+    "SeedVR2 restore + 2x": {"type": "unblur", "deblur": "None", "upscaler": "seedvr2_3b_fp8_e4m3fn.safetensors", "upscale_factor": 2},
+    "SeedVR2 restore + 4x": {"type": "unblur", "deblur": "None", "upscaler": "seedvr2_3b_fp8_e4m3fn.safetensors", "upscale_factor": 4},
+    "Unblur + Faces + Generative fix (light) + SeedVR2 2x": {"type": "unblur", "deblur": "NAFNet-GoPro-width64.pth", "faces": "GFPGANv1.4.pth", "refine": "generative", "refine_denoise": 0.4, "upscaler": "seedvr2_3b_fp8_e4m3fn.safetensors", "upscale_factor": 2},
+    "SeedVR2 2x + Generative tiled refine (light)": {"type": "unblur", "deblur": "None", "upscaler": "seedvr2_3b_fp8_e4m3fn.safetensors", "upscale_factor": 2, "refine": "tiled", "refine_denoise": 0.35},
+    "SeedVR2 2x + Generative tiled refine (medium)": {"type": "unblur", "deblur": "None", "upscaler": "seedvr2_3b_fp8_e4m3fn.safetensors", "upscale_factor": 2, "refine": "tiled", "refine_denoise": 0.5},
+    "SeedVR2 2x + Tile ControlNet refine (SDXL)": {"type": "unblur", "deblur": "None", "upscaler": "seedvr2_3b_fp8_e4m3fn.safetensors", "upscale_factor": 2, "refine": "tiled", "refine_controlnet": "tile", "refine_strength": 0.6, "refine_denoise": 0.45}
 }

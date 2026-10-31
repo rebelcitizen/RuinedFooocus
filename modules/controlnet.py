@@ -15,6 +15,9 @@ controlnet_models = {
     "depth": "control-lora-depth-rank128.safetensors",
     "recolour": "control-lora-recolor-rank128.safetensors",
     "sketch": "control-lora-sketch-rank128-metadata.safetensors",
+    # https://huggingface.co/xinsir/controlnet-tile-sdxl-1.0 (Apache 2.0): keeps an
+    # Img2Img pass at low denoise faithful while the checkpoint adds texture.
+    "tile": "controlnet-tile-sdxl-1.0.safetensors",
     "img2img": None,
     "upscale": None,
     "rembg": None,
@@ -80,7 +83,7 @@ def get_settings(gen_data):
     if "cn_selection" not in gen_data:
         return {}
     if gen_data["cn_selection"] == NEWCN:
-        return {
+        settings = {
             "type": gen_data["cn_type"].lower(),
             "edge_low": gen_data["cn_edge_low"],
             "edge_high": gen_data["cn_edge_high"],
@@ -89,6 +92,10 @@ def get_settings(gen_data):
             "strength": gen_data["cn_strength"],
             "upscaler": gen_data["cn_upscale"],
         }
+        if gen_data.get("cn_denoise") is not None:
+            # Img2Img denoise apart from the ControlNet strength (tile refine).
+            settings["denoise"] = gen_data["cn_denoise"]
+        return settings
     else:
         return (
             controlnet_settings[gen_data["cn_selection"]]
