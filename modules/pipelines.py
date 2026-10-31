@@ -7,6 +7,7 @@ import re
 import modules.image_pipeline as image_pipeline
 import modules.template_pipeline as template_pipeline
 import modules.upscale_pipeline as upscale_pipeline
+import modules.unblur_pipeline as unblur_pipeline
 import modules.search_pipeline as search_pipeline
 import modules.rembg_pipeline as rembg_pipeline
 import modules.llama_pipeline as llama_pipeline
@@ -60,6 +61,13 @@ def update(gen_data):
                 or "upscale" not in state["pipeline"].pipeline_type
             ):
                 state["pipeline"] = upscale_pipeline.pipeline()
+
+        elif cn_type.lower() == "unblur":
+            if (
+                state["pipeline"] is None
+                or "unblur" not in state["pipeline"].pipeline_type
+            ):
+                state["pipeline"] = unblur_pipeline.pipeline()
 
         elif cn_type.lower() == "rembg":
             if (

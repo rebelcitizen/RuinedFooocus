@@ -18,6 +18,7 @@ controlnet_models = {
     "img2img": None,
     "upscale": None,
     "rembg": None,
+    "unblur": None,
     "faceswap": None,
 }
 

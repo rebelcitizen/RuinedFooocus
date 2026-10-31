@@ -21,5 +21,12 @@
     "Sketch": {"type": "sketch", "strength": 0.9, "start": 0.0, "stop": 1.0},
     "Img2Img": {"type": "img2img", "start": 0.06, "denoise": 0.64},
     "Upscale": {"type": "upscale", "upscaler": "4x-UltraSharp.pth"},
-    "RemBG": {"type": "rembg"}
+    "RemBG": {"type": "rembg"},
+    "Unblur (NAFNet)": {"type": "unblur", "deblur": "NAFNet-GoPro-width64.pth"},
+    "Unblur (FFTformer)": {"type": "unblur", "deblur": "FFTformer-GoPro.pth"},
+    "Unblur + Faces (GFPGAN)": {"type": "unblur", "deblur": "NAFNet-GoPro-width64.pth", "faces": "GFPGANv1.4.pth"},
+    "Unblur + Upscale 2x (HAT-L)": {"type": "unblur", "deblur": "NAFNet-GoPro-width64.pth", "upscaler": "HAT-L-2x.pth"},
+    "Unblur + Faces + Upscale 2x (HAT-L)": {"type": "unblur", "deblur": "NAFNet-GoPro-width64.pth", "faces": "GFPGANv1.4.pth", "upscaler": "HAT-L-2x.pth"},
+    "Unblur + Sharpen, same size (HAT-L)": {"type": "unblur", "deblur": "NAFNet-GoPro-width64.pth", "sharpen": 120, "upscaler": "HAT-L-2x.pth", "keep_size": true},
+    "Faces only (GFPGAN)": {"type": "unblur", "deblur": "None", "faces": "GFPGANv1.4.pth"}
 }

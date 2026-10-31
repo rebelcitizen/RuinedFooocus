@@ -1,0 +1,6 @@
+{
+    "NAFNet-GoPro-width64.pth": {"url": "https://huggingface.co/nyanko7/nafnet-models/resolve/main/NAFNet-GoPro-width64.pth", "path": "path_upscalers", "filename": "NAFNet-GoPro-width64.pth"},
+    "FFTformer-GoPro.pth": {"url": "https://raw.githubusercontent.com/kkkls/FFTformer/main/pretrain_model/fftformer_GoPro.pth", "path": "path_upscalers", "filename": "FFTformer-GoPro.pth"},
+    "GFPGANv1.4.pth": {"url": "https://github.com/TencentARC/GFPGAN/releases/download/v1.3.4/GFPGANv1.4.pth", "path": "path_faceswap", "filename": "GFPGANv1.4.pth"},
+    "face_detection_yunet_2023mar.onnx": {"url": "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx", "path": "path_faceswap", "filename": "face_detection_yunet_2023mar.onnx"}
+}
