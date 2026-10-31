@@ -96,23 +96,51 @@ def to_image(tensor):
     return Image.fromarray(arr)
 
 
-def apply_model(desc, image_t):
-    """Run a 1x or Nx spandrel model over the whole image, tiled, with OOM fallback.
+GB = 1024 ** 3
 
-    ComfyUI's node halves the tile on a plain out-of-memory error. When the card is
-    nearly full because a checkpoint is still resident, the CUDA driver can instead
-    fail with "device not ready" / "Failed to create GPU mapping", which the node
-    re-raises as is. Treat that like an OOM: unload everything else and try again.
+
+def apply_model(desc, image_t, tile=None, overlap=32):
+    """Run a 1x or Nx spandrel model over the whole image, tiled.
+
+    Same tiling as ComfyUI's upscale node, but it asks model management for the
+    memory an attention upscaler such as HAT really needs on a 512 px tile, so a
+    resident checkpoint is offloaded before the run instead of the allocator
+    failing mid-tile ("device not ready", "Failed to create GPU mapping" or a
+    CUDACachingAllocator assert, none of which the node recognises as an OOM).
+    Any CUDA error that still happens frees everything and halves the tile.
     """
-    try:
-        return ImageUpscaleWithModel().upscale(desc, image_t)[0]
-    except RuntimeError as e:
-        if "cuda" not in str(e).lower():
-            raise
-        print(f"Unblur: {e}. Freeing VRAM and retrying once ...")
-        model_management.unload_all_models()
-        model_management.soft_empty_cache(True)
-        return ImageUpscaleWithModel().upscale(desc, image_t)[0]
+    device = desc.patcher.load_device
+    if tile is None:
+        # 256 px tiles keep HAT-sized upscalers well inside the card even next to a
+        # resident checkpoint; the 1x deblur nets are light enough for 512 px tiles.
+        tile = 256 if desc.scale > 1 else 512
+    memory_required = (6 * GB if desc.scale > 1 else 2 * GB) + image_t.nelement() * image_t.element_size() * 8
+    model_management.load_models_gpu([desc.patcher], memory_required=memory_required, force_full_load=True)
+    in_img = image_t.movedim(-1, -3).to(device)
+    output_device = model_management.intermediate_device()
+    while True:
+        try:
+            steps = in_img.shape[0] * comfy.utils.get_tiled_scale_steps(
+                in_img.shape[3], in_img.shape[2], tile_x=tile, tile_y=tile, overlap=overlap
+            )
+            pbar = comfy.utils.ProgressBar(steps)
+            out = comfy.utils.tiled_scale(
+                in_img, lambda a: desc(a.float()), tile_x=tile, tile_y=tile, overlap=overlap,
+                upscale_amount=desc.scale, pbar=pbar, output_device=output_device,
+            )
+            break
+        except Exception as e:
+            text = str(e).lower()
+            if "cuda" not in text and "out of memory" not in text:
+                raise
+            tile //= 2
+            if tile < 128:
+                raise
+            print(f"Unblur: {str(e).splitlines()[0]}. Freeing VRAM and retrying with {tile} px tiles ...")
+            model_management.unload_all_models()
+            model_management.soft_empty_cache(True)
+            model_management.load_models_gpu([desc.patcher], memory_required=memory_required, force_full_load=True)
+    return torch.clamp(out.movedim(-3, -1), min=0, max=1.0)
 
 
 def find_faces(rgb, detector_path):
@@ -135,7 +163,7 @@ def find_faces(rgb, detector_path):
 def restore_face(desc, crop, strength):
     """GFPGAN on one aligned 512 px RGB crop (uint8); returns float32 RGB."""
     device = desc.patcher.load_device
-    model_management.load_models_gpu([desc.patcher], force_full_load=True)
+    model_management.load_models_gpu([desc.patcher], memory_required=2 * GB, force_full_load=True)
     x = torch.from_numpy(crop.astype(np.float32) / 255.0).permute(2, 0, 1)[None].to(device)
     with torch.no_grad():
         y = desc.model(x * 2 - 1, return_rgb=False)[0]
