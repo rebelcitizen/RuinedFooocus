@@ -149,10 +149,11 @@ class ImageGenerationWorker(JobWorker):
         if self._rembg_session is None:
             self._rembg_session = rembg.new_session()
         with Image.open(path) as im:
-            rgba = rembg.remove(im.convert("RGB"), session=self._rembg_session)
+            rgb = im.convert("RGB")
+        rgba = rembg.remove(rgb, session=self._rembg_session)
         # u2net leaves the object at ~98% alpha; snap near-opaque and near-clear pixels so engines get a clean sprite.
         alpha = rgba.getchannel("A").point(lambda v: 255 if v >= 230 else (0 if v <= 15 else v))
-        rgba.putalpha(alpha)
+        rgba.putalpha(_clear_enclosed_backdrop(rgb, alpha))
         out = work_dir / f"{path.stem}_rgba.png"
         rgba.save(out, "PNG")
         return out
@@ -253,6 +254,38 @@ def _short(status: Any) -> Optional[str]:
         return None
     text = str(status).strip()
     return text[:PROGRESS_STATUS_MAX] if text else None
+
+
+def _clear_enclosed_backdrop(rgb: Image.Image, alpha: Image.Image) -> Image.Image:
+    """Clear the backdrop u2net keeps where the object encloses it (between twin hulls, inside a crane or a ring)
+    and in the pale fringe along its edge.
+
+    The backdrop colour is measured where u2net cleared the image. A kept region close to it, larger than 0.1%
+    of the image, is backdrop seen through a gap when at least a tenth of its pixels match the backdrop exactly
+    (within 3 levels): it and its anti-aliased rim are cleared. Paint that is merely pale stays (on 01/11/2026
+    gaps between hulls matched for 16-88% of their pixels, white hull paint for 1%), and so do specks smaller
+    than the area limit (glow cores, highlights).
+    """
+    import cv2
+    import numpy as np
+
+    px = np.asarray(rgb, dtype=np.int16)
+    a = np.array(alpha)
+    if not (a == 0).any():
+        return alpha
+    distance = np.abs(px - np.median(px[a == 0], axis=0)).max(axis=2)
+    near = ((distance <= 12) & (a > 0)).astype(np.uint8)
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(near, connectivity=4)
+    area = stats[:, cv2.CC_STAT_AREA]
+    exact = np.bincount(labels.ravel(), weights=(distance <= 3).ravel(), minlength=count)
+    gap = (area >= near.size // 1000) & (exact >= area / 10)
+    gap[0] = False  # label 0 is everything not close to the backdrop
+    hole = gap[labels]
+    if not hole.any():
+        return alpha
+    rim = cv2.dilate(hole.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool) & (distance <= 60)
+    a[hole | rim] = 0
+    return Image.fromarray(a, "L")
 
 
 def _png_metadata(path: Path) -> Dict[str, Any]:
